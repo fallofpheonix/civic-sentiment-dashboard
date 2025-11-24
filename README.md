@@ -136,3 +136,35 @@ This project demonstrates progressive enhancement in data science. Contributions
 MIT License - see LICENSE file for details.
 
 Built with ❤️ showing the evolution from basic analytics to advanced civic intelligence
+
+## 🌐 Live Deployment
+
+[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://your-app-name.streamlit.app/)
+
+*Replace with your actual Streamlit Cloud URL after deployment*
+
+## 🔧 API Setup for Local Development
+
+1. **Clone the repository**
+2. **Create `.streamlit/secrets.toml`** (see SETUP.md)
+3. **Install dependencies**: `pip install -r requirements.txt`
+4. **Run locally**: `streamlit run emotional_weather_map_pro.py`
+
+## 📊 Features Demonstrated
+
+### Real API Integrations
+- ✅ Twitter API v2 for real-time social sentiment
+- ✅ News API for media sentiment analysis  
+- ✅ Secure credential management with Streamlit secrets
+
+### Advanced Analytics
+- ✅ GIS emotional mapping with Folium
+- ✅ Civil unrest risk prediction
+- ✅ Community needs detection
+- ✅ Multi-source data aggregation
+
+### Professional Deployment
+- ✅ Production-ready error handling
+- ✅ Responsive design
+- ✅ Real-time data processing
+- ✅ Professional documentation
