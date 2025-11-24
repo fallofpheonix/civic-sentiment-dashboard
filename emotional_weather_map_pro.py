@@ -10,6 +10,7 @@ import json
 from datetime import datetime, timedelta
 import numpy as np
 import time
+import random  # Missing import!
 
 # Configure the page for professional deployment
 st.set_page_config(
@@ -95,25 +96,164 @@ auto_refresh = st.sidebar.checkbox("Auto-refresh Dashboard", False)
 
 # Mock API functions (replace with real APIs in production)
 def fetch_twitter_data(city, topics, count=50):
-    """Simulate Twitter API data fetch"""
-    # In real implementation, this would use tweepy and Twitter API v2
-    st.sidebar.info(f"📡 Fetching {count} tweets about {', '.join(topics)} in {city}")
+    """Real Twitter API v2 with proper error handling"""
+    try:
+        # Get from Streamlit secrets (secure)
+        bearer_token = st.secrets.get("TWITTER_BEARER_TOKEN", "")
+        
+        if not bearer_token:
+            st.sidebar.warning("🐦 Twitter API not configured - using mock data")
+            return generate_mock_social_data(city, topics, count, "Twitter")
+        
+        # Build smart search query based on topics
+        topic_queries = {
+            "Education": "(school OR teacher OR education OR student)",
+            "Healthcare": "(hospital OR health OR medical OR doctor)", 
+            "Transportation": "(transit OR traffic OR commute OR transportation)",
+            "Environment": "(environment OR climate OR pollution OR green)",
+            "Housing": "(housing OR rent OR apartment OR homeless)",
+            "Public Safety": "(safety OR police OR crime OR emergency)"
+        }
+        
+        # Combine selected topics
+        topic_filters = []
+        for topic in topics:
+            if topic in topic_queries:
+                topic_filters.append(topic_queries[topic])
+        
+        if not topic_filters:
+            topic_filters = ["(community OR city OR local)"]
+        
+        query = f"({' OR '.join(topic_filters)}) ({city}) lang:en -is:retweet -is:reply"
+        
+        headers = {"Authorization": f"Bearer {bearer_token}"}
+        params = {
+            "query": query,
+            "max_results": min(count, 50),  # Increased from 10 to 50
+            "tweet.fields": "created_at,public_metrics,context_annotations,author_id",
+            "expansions": "author_id"
+        }
+        
+        st.sidebar.info(f"🐦 Searching Twitter for: {', '.join(topics)} in {city}...")
+        
+        response = requests.get(
+            "https://api.twitter.com/2/tweets/search/recent",
+            headers=headers,
+            params=params
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            if data.get('data'):
+                processed_tweets = process_twitter_data(data, city, topics)
+                if processed_tweets:
+                    st.sidebar.success(f"✅ Fetched {len(processed_tweets)} real tweets!")
+                    return processed_tweets
+        
+        # If no tweets found or error
+        st.sidebar.warning(f"🔍 No tweets found for current filters - using mock data")
+        return generate_mock_social_data(city, topics, count, "Twitter")
+            
+    except Exception as e:
+        st.sidebar.error(f"🐦 Twitter API error: {str(e)[:100]}...")
+        return generate_mock_social_data(city, topics, count, "Twitter")
+
+
+def process_twitter_data(twitter_response, city, topics):
+    """Process raw Twitter API response into our format"""
+    processed = []
     
-    # Simulate API delay
-    time.sleep(1)
+    # Get user data if available
+    users = {}
+    if 'includes' in twitter_response and 'users' in twitter_response['includes']:
+        for user in twitter_response['includes']['users']:
+            users[user['id']] = user
     
-    # Return mock Twitter data
-    return generate_mock_social_data(city, topics, count, "Twitter")
+    for tweet in twitter_response['data']:
+        # Get user info if available
+        author_info = users.get(tweet.get('author_id', ''), {})
+        
+        emotion_data = analyze_advanced_emotions(tweet['text'])
+        
+        # Truncate long tweets for display
+        display_text = tweet['text']
+        if len(display_text) > 280:
+            display_text = display_text[:277] + "..."
+        
+        processed.append({
+            "id": f"twitter_{tweet['id']}",
+            "text": display_text,
+            "source": "Twitter",
+            "topic": classify_topic(tweet['text'], topics),
+            "city": city,
+            "timestamp": datetime.fromisoformat(tweet['created_at'].replace('Z', '+00:00')),
+            "sentiment_score": emotion_data["sentiment_score"],
+            "primary_emotion": emotion_data["primary_emotion"],
+            "engagement": tweet['public_metrics']['like_count'] + tweet['public_metrics']['retweet_count'],
+            "verified": author_info.get('verified', False),
+            "risk_level": emotion_data["risk_level"],
+            "urgency_level": emotion_data["urgency_level"],
+            "user_followers": author_info.get('public_metrics', {}).get('followers_count', 0),
+            "retweet_count": tweet['public_metrics']['retweet_count'],
+            "like_count": tweet['public_metrics']['like_count']
+        })
+    
+    return processed
 
 def fetch_news_data(city, topics, count=30):
-    """Simulate News API data fetch"""
-    st.sidebar.info(f"📰 Fetching {count} news articles about {', '.join(topics)} in {city}")
-    
-    # Simulate API delay
-    time.sleep(1)
-    
-    # Return mock news data
-    return generate_mock_social_data(city, topics, count, "News")
+    """Real News API integration"""
+    try:
+        # Use your actual News API key
+        api_key = "37cbeae280284824a36609781595ff4f"
+        
+        # Build query - search for topics in the city
+        query_terms = " OR ".join([f'"{topic}"' for topic in topics])
+        query = f"({query_terms}) AND ({city})"
+        
+        # News API endpoint
+        url = f"https://newsapi.org/v2/everything?q={query}&pageSize={min(count, 30)}&sortBy=publishedAt&language=en&apiKey={api_key}"
+        
+        st.sidebar.info(f"📰 Fetching news about {', '.join(topics)} in {city}...")
+        
+        response = requests.get(url)
+        data = response.json()
+        
+        if data.get('status') == 'ok' and data.get('articles'):
+            processed_articles = []
+            for article in data['articles']:
+                # Combine title and description for sentiment analysis
+                article_text = f"{article['title']} - {article.get('description', '')}"
+                
+                emotion_data = analyze_advanced_emotions(article_text)
+                
+                processed_articles.append({
+                    "id": f"news_{article.get('publishedAt', '')}_{hash(article_text)}",
+                    "text": f"{article['title']} - {article.get('description', 'No description')}",
+                    "source": "News",
+                    "topic": classify_topic(article['title'], topics),
+                    "city": city,
+                    "timestamp": datetime.fromisoformat(article['publishedAt'].replace('Z', '+00:00')) if article.get('publishedAt') else datetime.now(),
+                    "sentiment_score": emotion_data["sentiment_score"],
+                    "primary_emotion": emotion_data["primary_emotion"],
+                    "engagement": 0,  # News articles don't have engagement metrics
+                    "verified": True,
+                    "risk_level": emotion_data["risk_level"],
+                    "urgency_level": emotion_data["urgency_level"],
+                    "url": article.get('url', ''),
+                    "source_name": article.get('source', {}).get('name', 'Unknown')
+                })
+            
+            st.sidebar.success(f"✅ Fetched {len(processed_articles)} real news articles")
+            return processed_articles
+        else:
+            st.sidebar.warning(f"No news articles found for: {query}")
+            # Fallback to mock data if no real articles found
+            return generate_mock_social_data(city, topics, count, "News")
+            
+    except Exception as e:
+        st.sidebar.error(f"News API Error: {e}")
+        # Fallback to mock data on error
+        return generate_mock_social_data(city, topics, count, "News")
 
 def fetch_government_data(city, count=20):
     """Simulate Open Government Data API"""
@@ -141,13 +281,41 @@ def generate_mock_social_data(city, topics, count, source):
             f"{city} residents struggle with medical costs",
             f"Mental health services expand in {city}",
             f"Healthcare workers protest in {city}"
+        ],
+        "Transportation": [
+            f"Public transit improvements needed in {city}",
+            f"{city} commuters face daily traffic challenges",
+            f"New bike lanes welcomed in {city}",
+            f"Infrastructure projects underway across {city}",
+            f"Transportation access issues in {city} neighborhoods"
+        ],
+        "Environment": [
+            f"Air quality concerns raised in {city}",
+            f"{city} launches new sustainability initiative",
+            f"Community gardens thriving across {city}",
+            f"Environmental protection efforts in {city}",
+            f"Green space preservation in {city}"
+        ],
+        "Housing": [
+            f"Affordable housing crisis in {city}",
+            f"New housing developments in {city}",
+            f"Rent control discussions in {city} council",
+            f"Housing accessibility issues in {city}",
+            f"Community housing projects in {city}"
+        ],
+        "Public Safety": [
+            f"Public safety initiatives in {city}",
+            f"Community policing efforts in {city}",
+            f"Emergency response improvements in {city}",
+            f"Neighborhood watch programs in {city}",
+            f"Public safety concerns addressed in {city}"
         ]
-        # ... more topics
     }
     
     for i in range(count):
         topic = random.choice(topics)
-        text = random.choice(civic_issues.get(topic, [f"Community discussion in {city}"]))
+        text_options = civic_issues.get(topic, [f"Community discussion in {city}"])
+        text = random.choice(text_options)
         
         emotion_data = analyze_advanced_emotions(text)
         
@@ -161,10 +329,59 @@ def generate_mock_social_data(city, topics, count, source):
             "sentiment_score": emotion_data["sentiment_score"],
             "primary_emotion": emotion_data["primary_emotion"],
             "engagement": random.randint(10, 1000) if source == "Twitter" else random.randint(5, 100),
-            "verified": random.choice([True, False]) if source == "Twitter" else True
+            "verified": random.choice([True, False]) if source == "Twitter" else True,
+            "risk_level": emotion_data["risk_level"],
+            "urgency_level": emotion_data["urgency_level"]
         })
     
     return posts
+
+
+def classify_topic(title, topics):
+    """Heuristic topic classifier for news titles.
+
+    Returns the first topic that appears in the title (case-insensitive),
+    otherwise returns a random topic from the provided list or 'General'.
+    """
+    if not title:
+        return topics[0] if topics else "General"
+
+    title_lower = title.lower()
+    for t in topics:
+        if t.lower() in title_lower:
+            return t
+
+    return random.choice(topics) if topics else "General"
+
+def classify_topic(text, available_topics):
+    """Classify text into one of the available topics based on keywords"""
+    if not text:
+        return random.choice(available_topics) if available_topics else "General"
+    
+    text_lower = text.lower()
+    
+    # Topic keywords mapping
+    topic_keywords = {
+        "Education": ['school', 'teacher', 'student', 'education', 'university', 'college', 'campus', 'tuition'],
+        "Healthcare": ['hospital', 'health', 'medical', 'doctor', 'clinic', 'healthcare', 'medicine', 'patient'],
+        "Transportation": ['transit', 'bus', 'train', 'traffic', 'transportation', 'commute', 'subway', 'highway'],
+        "Environment": ['environment', 'pollution', 'green', 'sustainability', 'climate', 'recycling', 'clean energy'],
+        "Housing": ['housing', 'rent', 'apartment', 'homeless', 'affordable', 'eviction', 'mortgage'],
+        "Public Safety": ['safety', 'police', 'crime', 'emergency', 'fire', 'security', 'law enforcement']
+    }
+    
+    # Count keyword matches for each topic
+    topic_scores = {}
+    for topic in available_topics:
+        if topic in topic_keywords:
+            score = sum(1 for keyword in topic_keywords[topic] if keyword in text_lower)
+            topic_scores[topic] = score
+    
+    # Return topic with highest score, or random if no matches
+    if topic_scores and max(topic_scores.values()) > 0:
+        return max(topic_scores, key=topic_scores.get)
+    else:
+        return random.choice(available_topics) if available_topics else "General"
 
 def generate_mock_government_data(city, count):
     """Generate realistic government open data"""
@@ -362,12 +579,13 @@ def main():
         risk_col1, risk_col2, risk_col3 = st.columns(3)
         
         with risk_col1:
-            risk_color = {"High": "red", "Medium": "orange", "Low": "green"}[unrest_prediction["risk_level"]]
+            risk_level = unrest_prediction["risk_level"]
+            delta_color = "normal" if risk_level == "Low" else "inverse"
             st.metric(
                 "Unrest Risk Level", 
-                unrest_prediction["risk_level"],
+                risk_level,
                 f"{unrest_prediction['confidence']:.0%} confidence",
-                delta_color="normal" if unrest_prediction["risk_level"] == "Low" else "inverse"
+                delta_color=delta_color
             )
         
         with risk_col2:
@@ -381,6 +599,8 @@ def main():
             st.warning("**Risk Factors Identified:**")
             for factor in unrest_prediction["factors"]:
                 st.write(f"• {factor}")
+        else:
+            st.success("No significant risk factors detected.")
     
     # Community Needs Detection
     if enable_needs_detection and not df.empty:
